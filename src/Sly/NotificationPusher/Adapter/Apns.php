@@ -45,6 +45,7 @@ class Apns extends BaseAdapter
         parent::__construct($parameters);
 
         $cert = $this->getParameter('certificate');
+        $this->erroredDevices = new DeviceCollection();
 
         if (false === file_exists($cert)) {
             throw new AdapterException(sprintf('Certificate %s does not exist', $cert));
@@ -62,9 +63,9 @@ class Apns extends BaseAdapter
 
         $pushedDevices = new DeviceCollection();
 
+        $i=1;
         foreach ($push->getDevices() as $device) {
-            $message = $this->getServiceMessageFromOrigin($device, $push->getMessage());
-
+            $message = $this->getServiceMessageFromOrigin($device, $push->getMessage(),$i);
             try {
                 $this->response = $client->send($message);
             } catch (ServiceRuntimeException $e) {
@@ -74,11 +75,42 @@ class Apns extends BaseAdapter
             if (ServiceResponse::RESULT_OK === $this->response->getCode()) {
                 $pushedDevices->add($device);
             }
+
+            $i++;
+        }
+
+
+        //determines if the connection was cut off and re-pushes if needed
+        usleep(100000);
+        $socket = $client->getSocket();
+        $apple_error_response = fread($socket,6);
+        if($apple_error_response){
+            $error_response = unpack('Ccommand/Cstatus_code/Nidentifier', $apple_error_response);
+            $bad_id = $error_response['identifier'];
+            $bad_device = $this->getBadDevice($push,$bad_id);
+            $this->erroredDevices->add($bad_device);
+            $push->setDevices($push->getDevices()->remove($bad_device));
+            $client->close();
+            $this->push($push);
         }
 
         $client->close();
 
         return $pushedDevices;
+    }
+
+    private function getBadDevice(PushInterface $push,$id){
+        $i=1;
+        foreach ($push->getDevices() as $device) {
+            if($id == $i){
+                return $device;
+            }
+            $i++;
+        }
+    }
+
+    public function getBadDevices(){
+        return $this->erroredDevices;
     }
 
     /**
@@ -126,7 +158,7 @@ class Apns extends BaseAdapter
      *
      * @return \ZendService\Apple\Apns\Message
      */
-    public function getServiceMessageFromOrigin(DeviceInterface $device, BaseOptionedModel $message)
+    public function getServiceMessageFromOrigin(DeviceInterface $device, BaseOptionedModel $message, $id)
     {
         $badge = ($message->hasOption('badge'))
             ? (int) ($message->getOption('badge') + $device->getParameter('badge', 0))
@@ -156,7 +188,7 @@ class Apns extends BaseAdapter
         }
 
         $serviceMessage = new ServiceMessage();
-        $serviceMessage->setId(sha1($device->getToken().$message->getText()));
+        $serviceMessage->setId($id);
         $serviceMessage->setAlert($alert);
         $serviceMessage->setToken($device->getToken());
         $serviceMessage->setBadge($badge);

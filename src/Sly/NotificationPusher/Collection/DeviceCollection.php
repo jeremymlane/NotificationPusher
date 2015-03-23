@@ -52,6 +52,11 @@ class DeviceCollection extends AbstractCollection implements \IteratorAggregate
         $this->coll[$device->getToken()] = $device;
     }
 
+    public function remove(DeviceInterface $device){
+        unset($this->coll[$device->getToken()]);
+        return $this;
+    }
+
     /**
      * Get tokens.
      *

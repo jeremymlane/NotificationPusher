@@ -35,6 +35,9 @@ use ZendService\Apple\Apns\Client\Feedback as ServiceFeedbackClient;
  */
 class Apns extends BaseAdapter
 {
+
+    private $lastErroredId = 0;
+
     /**
      * {@inheritdoc}
      *
@@ -65,15 +68,17 @@ class Apns extends BaseAdapter
 
         $i=1;
         foreach ($push->getDevices() as $device) {
-            $message = $this->getServiceMessageFromOrigin($device, $push->getMessage(),$i);
-            try {
-                $this->response = $client->send($message);
-            } catch (ServiceRuntimeException $e) {
-                throw new PushException($e->getMessage());
-            }
+            if($i > $this->lastErroredId){
+                $message = $this->getServiceMessageFromOrigin($device, $push->getMessage(),$i);
+                try {
+                    $this->response = $client->send($message);
+                } catch (ServiceRuntimeException $e) {
+                    throw new PushException($e->getMessage());
+                }
 
-            if (ServiceResponse::RESULT_OK === $this->response->getCode()) {
-                $pushedDevices->add($device);
+                if (ServiceResponse::RESULT_OK === $this->response->getCode()) {
+                    $pushedDevices->add($device);
+                }
             }
 
             $i++;
@@ -87,9 +92,10 @@ class Apns extends BaseAdapter
         if($apple_error_response){
             $error_response = unpack('Ccommand/Cstatus_code/Nidentifier', $apple_error_response);
             $bad_id = $error_response['identifier'];
+            $this->lastErroredId = $bad_id;
             $bad_device = $this->getBadDevice($push,$bad_id);
             $this->erroredDevices->add($bad_device);
-            $push->setDevices($push->getDevices()->remove($bad_device));
+            //$push->setDevices($push->getDevices()->remove($bad_device));
             $client->close();
             $this->push($push);
         }
